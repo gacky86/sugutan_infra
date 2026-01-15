@@ -19,6 +19,9 @@ data "aws_ssm_parameter" "sugutan_api_db_username" {
 data "aws_ssm_parameter" "sugutan_api_db_password" {
   name  = "/sugutan-api/${var.stage}/rds/db_password"
 }
+data "aws_ssm_parameter" "sugutan_api_rails_master_key" {
+  name  = "/sugutan-api/${var.stage}/rds/rails_master_key"
+}
 # 信頼関係ポリシー
 data "aws_iam_policy_document" "ecs_task_execution_assume_role" {
   statement {
@@ -46,10 +49,11 @@ data "aws_iam_policy_document" "ecs_task_execution" {
     actions   = ["ssm:GetParameters", "ssm:GetParameter"]
     # 参照するパラメータストアを記述
     resources = [
-      data.aws_ssm_parameter.sugutan_api_db_host.arn,
+      aws_ssm_parameter.sugutan_api_db_host.arn,
       data.aws_ssm_parameter.sugutan_api_db_name.arn,
       data.aws_ssm_parameter.sugutan_api_db_username.arn,
-      data.aws_ssm_parameter.sugutan_api_db_password.arn
+      data.aws_ssm_parameter.sugutan_api_db_password.arn,
+      data.aws_ssm_parameter.sugutan_api_rails_master_key.arn,
     ]
   }
 }
@@ -64,7 +68,7 @@ resource "aws_iam_role_policy_attachments_exclusive" "ecs_task_execution_managed
   role_name   = aws_iam_role.ecs_task_execution_role.name
 }
 # IAMロールにインラインポリシーをアタッチ
-resource "aws_iam_role" "ecs_task_execution_inline_policy" {
+resource "aws_iam_role_policy" "ecs_task_execution_inline_policy" {
   name = "${var.stage}-sugutan-api-ecs-task-execution-policy"
   role = aws_iam_role.ecs_task_execution_role.name
   policy = data.aws_iam_policy_document.ecs_task_execution.json
@@ -176,14 +180,19 @@ resource "aws_vpc_security_group_ingress_rule" "lb_from_http" {
 }
 # ALB用のセキュリティグループ アウトバウンドルール
 # ECS Fargate インスタンスの3000番ポートへの接続を許可
-resource "aws_vpc_security_group_egress_rule" "lb_to_ecs_instance" {
+resource "aws_vpc_security_group_egress_rule" "lb_to_all" {
   security_group_id = aws_security_group.alb.id
-  ip_protocol = "tcp"
-  from_port   = 3000
-  to_port     = 3000
-  # ECS Fargate インスタンス用のセキュリティグループがアタッチされたENIへの通信を許可
-  referenced_security_group_id = aws_security_group.ecs_instance.id
+  ip_protocol = "-1"
+  cidr_ipv4   = "0.0.0.0/0"
 }
+# resource "aws_vpc_security_group_egress_rule" "lb_to_ecs_instance" {
+#   security_group_id = aws_security_group.alb.id
+#   ip_protocol = "tcp"
+#   from_port   = 3000
+#   to_port     = 3000
+#   # ECS Fargate インスタンス用のセキュリティグループがアタッチされたENIへの通信を許可
+#   referenced_security_group_id = aws_security_group.ecs_instance.id
+# }
 # ECS Fargate インスタンス用のセキュリティグループ　インバウンドルール
 # ALBから3000番ポートへの接続を許可
 resource "aws_vpc_security_group_ingress_rule" "ecs_instance_from_lb" {
@@ -297,10 +306,19 @@ locals {
           name = "DB_PASSWORD"
           valueFrom = data.aws_ssm_parameter.sugutan_api_db_password.arn
         },
+        {
+          name = "RAILS_MASTER_KEY"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_rails_master_key.arn
+        },
       ]
       essential = true
       # ECRリポジトリのデータソースを参照
       image = "${data.aws_ecr_repository.sugutan_api.repository_url}:latest"
+      environment = [
+        { name = "RAILS_ENV", value = "production" },
+        { name = "RAILS_LOG_TO_STDOUT", value = "true" },
+        { name = "RAILS_SERVE_STATIC_FILES", value = "true" }
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -329,7 +347,7 @@ resource "aws_ecs_task_definition" "sugutan_api" {
   family = "${var.stage}-sugutan-api"
   memory = "512"
   network_mode = "awsvpc"
-  require_compatibilities = [
+  requires_compatibilities = [
     "FARGATE",
   ]
   task_role_arn = aws_iam_role.ecs_task.arn
@@ -340,7 +358,7 @@ resource "aws_ecs_task_definition" "sugutan_api" {
 resource "aws_ecs_service" "sugutan_api" {
   cluster         = aws_ecs_cluster.sugutan_api.id
   desired_count   = 0
-  enable_execution_command = true
+  enable_execute_command = true
   health_check_grace_period_seconds = 60
   launch_type = "FARGATE"
   name            = "sugutan-api"
@@ -389,9 +407,9 @@ resource "aws_db_instance" "sugutan_api" {
   storage_type         = "gp2"
 
   # DB接続情報
-  db_name              = data.aws_ssm_parameter.sugutan_api_db_name
-  username             = data.aws_ssm_parameter.sugutan_api_db_username
-  password             = data.aws_ssm_parameter.sugutan_api_db_password
+  db_name              = data.aws_ssm_parameter.sugutan_api_db_name.value
+  username             = data.aws_ssm_parameter.sugutan_api_db_username.value
+  password             = data.aws_ssm_parameter.sugutan_api_db_password.value
 
   db_subnet_group_name   = aws_db_subnet_group.sugutan_api.name
   vpc_security_group_ids = [aws_security_group.rds.id]
