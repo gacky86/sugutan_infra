@@ -1,6 +1,6 @@
 resource "aws_ecr_repository" "sugutan_api" {
   name                 = "${var.stage}-sugutan-api"
-  image_tag_mutability = "IMMUTABLE" # 編集
+  # image_tag_mutability = "IMMUTABLE" # 編集
 }
 # Railsで使用する環境変数
 # DB関連
@@ -36,6 +36,16 @@ resource "aws_ssm_parameter" "sugutan_api_db_username" {
 }
 resource "aws_ssm_parameter" "sugutan_api_db_password" {
   name  = "/sugutan-api/${var.stage}/rds/db_password"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
+resource "aws_ssm_parameter" "sugutan_api_rails_master_key" {
+  name  = "/sugutan-api/${var.stage}/rds/rails_master_key"
   type  = "SecureString"
   value = "uninitialized"
   lifecycle {
