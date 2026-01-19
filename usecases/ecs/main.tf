@@ -22,6 +22,12 @@ data "aws_ssm_parameter" "sugutan_api_db_password" {
 data "aws_ssm_parameter" "sugutan_api_rails_master_key" {
   name  = "/sugutan-api/${var.stage}/rds/rails_master_key"
 }
+data "aws_ssm_parameter" "sugutan_api_smtp_username" {
+  name  = "/sugutan-api/${var.stage}/smtp/smtp_username"
+}
+data "aws_ssm_parameter" "sugutan_api_smtp_password" {
+  name  = "/sugutan-api/${var.stage}/smtp/smtp_password"
+}
 # 信頼関係ポリシー
 data "aws_iam_policy_document" "ecs_task_execution_assume_role" {
   statement {
@@ -54,6 +60,8 @@ data "aws_iam_policy_document" "ecs_task_execution" {
       data.aws_ssm_parameter.sugutan_api_db_username.arn,
       data.aws_ssm_parameter.sugutan_api_db_password.arn,
       data.aws_ssm_parameter.sugutan_api_rails_master_key.arn,
+      data.aws_ssm_parameter.sugutan_api_smtp_username.arn,
+      data.aws_ssm_parameter.sugutan_api_smtp_password.arn,
     ]
   }
 }
@@ -170,7 +178,6 @@ resource "aws_security_group" "rds" {
 }
 # ALB用のセキュリティグループ インバウンドルール
 # 任意のIPアドレスからHTTPポート(80)への接続を許可
-# HTTPS(443)用も後々用意する
 resource "aws_vpc_security_group_ingress_rule" "lb_from_http" {
   security_group_id = aws_security_group.alb.id
   ip_protocol = "tcp"
@@ -178,21 +185,21 @@ resource "aws_vpc_security_group_ingress_rule" "lb_from_http" {
   to_port     = 80
   cidr_ipv4   = "0.0.0.0/0"
 }
+# 任意のIPアドレスからHTTPSポート(443)への接続を許可
+resource "aws_vpc_security_group_ingress_rule" "lb_from_https" {
+  security_group_id = aws_security_group.alb.id
+  ip_protocol = "tcp"
+  from_port   = 443
+  to_port     = 443
+  cidr_ipv4   = "0.0.0.0/0"
+}
 # ALB用のセキュリティグループ アウトバウンドルール
-# ECS Fargate インスタンスの3000番ポートへの接続を許可
+# 全てのアウトバウンド通信を許可
 resource "aws_vpc_security_group_egress_rule" "lb_to_all" {
   security_group_id = aws_security_group.alb.id
   ip_protocol = "-1"
   cidr_ipv4   = "0.0.0.0/0"
 }
-# resource "aws_vpc_security_group_egress_rule" "lb_to_ecs_instance" {
-#   security_group_id = aws_security_group.alb.id
-#   ip_protocol = "tcp"
-#   from_port   = 3000
-#   to_port     = 3000
-#   # ECS Fargate インスタンス用のセキュリティグループがアタッチされたENIへの通信を許可
-#   referenced_security_group_id = aws_security_group.ecs_instance.id
-# }
 # ECS Fargate インスタンス用のセキュリティグループ　インバウンドルール
 # ALBから3000番ポートへの接続を許可
 resource "aws_vpc_security_group_ingress_rule" "ecs_instance_from_lb" {
@@ -256,14 +263,32 @@ resource "aws_lb_target_group" "sugutan_api" {
 # 80番ポートで受け付けたリクエストをターゲットグループに転送
 # ？ここもHTTPS用に改造もしくは追加が必要？
 # もしHTTPS用なら、docの方が近いかも
+# HTTPSリスナー
+resource "aws_lb_listener" "sugutan_api_https" {
+  load_balancer_arn = aws_lb.sugutan_api.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = aws_acm_certificate_validation.sugutan_api.certificate_arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.sugutan_api.arn
+  }
+}
 resource "aws_lb_listener" "sugutan_api" {
   load_balancer_arn = aws_lb.sugutan_api.arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.sugutan_api.arn
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
   }
 }
 
@@ -309,6 +334,14 @@ locals {
         {
           name = "RAILS_MASTER_KEY"
           valueFrom = data.aws_ssm_parameter.sugutan_api_rails_master_key.arn
+        },
+        {
+          name = "SMTP_USERNAME"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_smtp_username.arn
+        },
+        {
+          name = "SMTP_PASSWORD"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_smtp_password.arn
         },
       ]
       essential = true
@@ -424,4 +457,58 @@ resource "aws_ssm_parameter" "sugutan_api_db_host" {
   name  = "/sugutan-api/${var.stage}/rds/db_host"
   type  = "String"
   value = aws_db_instance.sugutan_api.address
+}
+
+# ====== ACM ======
+# ホストゾーンの情報を取得
+data "aws_route53_zone" "sugutan_api" {
+  name = "sugutan.site"
+}
+
+# ACM証明書のリクエスト
+resource "aws_acm_certificate" "sugutan_api" {
+  domain_name       = "api.sugutan.site"
+  validation_method = "DNS"
+  # ダウンタイムを生まないためにリソース更新時に新規作成→旧版削除の順番で行う設定
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# DNS検証用レコードをRoute53に作成
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.sugutan_api.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = data.aws_route53_zone.sugutan_api.zone_id
+}
+
+# 検証が完了するまで待機するリソース
+resource "aws_acm_certificate_validation" "sugutan_api" {
+  certificate_arn         = aws_acm_certificate.sugutan_api.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+}
+
+
+# ====== Route53 =======
+resource "aws_route53_record" "sugutan_api_alb" {
+  zone_id = data.aws_route53_zone.sugutan_api.zone_id
+  name    = "api.sugutan.site"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.sugutan_api.dns_name
+    zone_id                = aws_lb.sugutan_api.zone_id
+    evaluate_target_health = true
+  }
 }

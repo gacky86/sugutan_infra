@@ -54,3 +54,23 @@ resource "aws_ssm_parameter" "sugutan_api_rails_master_key" {
     ]
   }
 }
+resource "aws_ssm_parameter" "sugutan_api_smtp_username" {
+  name  = "/sugutan-api/${var.stage}/smtp/smtp_username"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
+resource "aws_ssm_parameter" "sugutan_api_smtp_password" {
+  name  = "/sugutan-api/${var.stage}/smtp/smtp_password"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
