@@ -28,6 +28,9 @@ data "aws_ssm_parameter" "sugutan_api_smtp_username" {
 data "aws_ssm_parameter" "sugutan_api_smtp_password" {
   name  = "/sugutan-api/${var.stage}/smtp/smtp_password"
 }
+data "aws_ssm_parameter" "sugutan_api_gemini_api_key" {
+  name  = "/sugutan-api/${var.stage}/gemini/gemini_api_key"
+}
 # 信頼関係ポリシー
 data "aws_iam_policy_document" "ecs_task_execution_assume_role" {
   statement {
@@ -62,6 +65,7 @@ data "aws_iam_policy_document" "ecs_task_execution" {
       data.aws_ssm_parameter.sugutan_api_rails_master_key.arn,
       data.aws_ssm_parameter.sugutan_api_smtp_username.arn,
       data.aws_ssm_parameter.sugutan_api_smtp_password.arn,
+      data.aws_ssm_parameter.sugutan_api_gemini_api_key.arn
     ]
   }
 }
@@ -342,6 +346,10 @@ locals {
         {
           name = "SMTP_PASSWORD"
           valueFrom = data.aws_ssm_parameter.sugutan_api_smtp_password.arn
+        },
+        {
+          name = "GEMINI_API_KEY"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_gemini_api_key.arn
         },
       ]
       essential = true

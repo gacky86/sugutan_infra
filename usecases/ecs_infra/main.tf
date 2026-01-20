@@ -74,3 +74,13 @@ resource "aws_ssm_parameter" "sugutan_api_smtp_password" {
     ]
   }
 }
+resource "aws_ssm_parameter" "sugutan_api_gemini_api_key" {
+  name  = "/sugutan-api/${var.stage}/gemini/gemini_api_key"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
