@@ -31,6 +31,12 @@ data "aws_ssm_parameter" "sugutan_api_smtp_password" {
 data "aws_ssm_parameter" "sugutan_api_gemini_api_key" {
   name  = "/sugutan-api/${var.stage}/gemini/gemini_api_key"
 }
+data "aws_ssm_parameter" "sugutan_api_gmail_user_name" {
+  name  = "/sugutan-api/${var.stage}/gmail/gmail_user_name"
+}
+data "aws_ssm_parameter" "sugutan_api_gmail_password" {
+  name  = "/sugutan-api/${var.stage}/gmail/gmail_password"
+}
 # 信頼関係ポリシー
 data "aws_iam_policy_document" "ecs_task_execution_assume_role" {
   statement {
@@ -65,7 +71,9 @@ data "aws_iam_policy_document" "ecs_task_execution" {
       data.aws_ssm_parameter.sugutan_api_rails_master_key.arn,
       data.aws_ssm_parameter.sugutan_api_smtp_username.arn,
       data.aws_ssm_parameter.sugutan_api_smtp_password.arn,
-      data.aws_ssm_parameter.sugutan_api_gemini_api_key.arn
+      data.aws_ssm_parameter.sugutan_api_gemini_api_key.arn,
+      data.aws_ssm_parameter.sugutan_api_gmail_user_name.arn,
+      data.aws_ssm_parameter.sugutan_api_gmail_password.arn
     ]
   }
 }
@@ -350,6 +358,14 @@ locals {
         {
           name = "GEMINI_API_KEY"
           valueFrom = data.aws_ssm_parameter.sugutan_api_gemini_api_key.arn
+        },
+        {
+          name = "GMAIL_USER_NAME"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_gmail_user_name.arn
+        },
+        {
+          name = "GMAIL_PASSWORD"
+          valueFrom = data.aws_ssm_parameter.sugutan_api_gmail_password.arn
         },
       ]
       essential = true
