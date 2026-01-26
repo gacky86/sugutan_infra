@@ -84,3 +84,23 @@ resource "aws_ssm_parameter" "sugutan_api_gemini_api_key" {
     ]
   }
 }
+resource "aws_ssm_parameter" "sugutan_api_gmail_user_name" {
+  name  = "/sugutan-api/${var.stage}/gmail/gmail_user_name"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
+resource "aws_ssm_parameter" "sugutan_api_gmail_password" {
+  name  = "/sugutan-api/${var.stage}/gmail/gmail_password"
+  type  = "SecureString"
+  value = "uninitialized"
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
